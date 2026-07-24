@@ -14,18 +14,17 @@ import {
   Upload,
   Download,
   Trash2,
-  Home,
   Loader2,
   Search,
   ArrowUp,
   ArrowDown,
+  UploadCloud,
 } from 'lucide-react';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   AlertDialog,
@@ -224,16 +223,14 @@ export function FileExplorer() {
   }, [listData?.objects, search, currentPrefix, sortKey, sortDir]);
 
   if (isLoadingBuckets) {
-    return <div className="flex justify-center p-12"><Loader2 className="animate-spin w-8 h-8 text-blue-400" /></div>;
+    return <div className="flex justify-center p-12"><Loader2 className="animate-spin w-6 h-6 text-primary" /></div>;
   }
 
   if (!buckets?.length) {
     return (
-      <Card className="m-8">
-        <CardContent className="p-8 text-center text-slate-500">
-          No buckets configured. Add <code>BUCKET_1_ID</code>, <code>BUCKET_1_NAME</code>, etc. to your <code>.env</code> file.
-        </CardContent>
-      </Card>
+      <div className="border border-border rounded-lg bg-card p-8 text-center text-sm text-muted-foreground font-mono">
+        No buckets configured. Add <code className="text-foreground">BUCKET_1_ID</code>, <code className="text-foreground">BUCKET_1_NAME</code>, etc. to your <code className="text-foreground">.env</code> file.
+      </div>
     );
   }
 
@@ -251,25 +248,25 @@ export function FileExplorer() {
   );
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-6xl mx-auto p-4 md:p-8">
-      <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 mb-2">
-        <div className="relative w-full sm:w-[250px]">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+    <div className="flex flex-col gap-4 w-full max-w-6xl mx-auto p-4 md:p-8">
+      <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="relative w-full sm:w-[260px]">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search this folder..."
-            className="pl-8"
+            className="pl-8 font-mono text-xs"
           />
         </div>
-        <div className="w-full sm:w-[250px]">
+        <div className="w-full sm:w-[260px]">
           <Select value={activeBucketId} onValueChange={(val) => { setActiveBucketId(val || ''); handleNavigate(''); }}>
-            <SelectTrigger>
+            <SelectTrigger className="w-full font-mono text-xs">
               <SelectValue placeholder="Select bucket..." />
             </SelectTrigger>
             <SelectContent>
               {buckets.map((b: Bucket) => (
-                <SelectItem key={b.id} value={b.id}>
+                <SelectItem key={b.id} value={b.id} className="font-mono text-xs">
                   {b.bucket_name} ({b.id})
                 </SelectItem>
               ))}
@@ -278,48 +275,49 @@ export function FileExplorer() {
         </div>
       </div>
 
-      <Card className="glass shadow-sm border-0 bg-white/70 dark:bg-slate-900/70 backdrop-blur-md">
-        <CardHeader className="flex flex-row items-center justify-between pb-4 space-y-0 border-b">
-          <CardTitle>
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem>
-                  <BreadcrumbLink
-                    onClick={(e: React.MouseEvent) => { e.preventDefault(); handleNavigate(''); }}
-                    href="#"
-                    className="flex items-center gap-2"
-                  >
-                    <Home className="w-4 h-4" />
-                    <span>{activeBucket?.bucket_name || activeBucketId}</span>
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                {breadcrumbs.length > 0 && <BreadcrumbSeparator />}
+      <div className="border border-border rounded-lg bg-card overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-4 h-12 border-b border-border">
+          <Breadcrumb className="min-w-0">
+            <BreadcrumbList className="flex-nowrap font-mono text-[13px] gap-1">
+              <span className="text-muted-foreground/50 shrink-0">s3://</span>
+              <BreadcrumbItem className="shrink-0">
+                <BreadcrumbLink
+                  onClick={(e: React.MouseEvent) => { e.preventDefault(); handleNavigate(''); }}
+                  href="#"
+                  className="text-primary font-medium hover:text-primary/80"
+                >
+                  {activeBucket?.bucket_name || activeBucketId}
+                </BreadcrumbLink>
+              </BreadcrumbItem>
+              {breadcrumbs.length > 0 && (
+                <BreadcrumbSeparator className="text-muted-foreground/50">/</BreadcrumbSeparator>
+              )}
 
-                {breadcrumbs.map((crumb, idx) => {
-                  const isLast = idx === breadcrumbs.length - 1;
-                  const prefix = breadcrumbs.slice(0, idx + 1).join('/') + '/';
-                  return (
-                    <span key={prefix} className="flex items-center gap-1.5 sm:gap-2.5">
-                      <BreadcrumbItem>
-                        {isLast ? (
-                          <BreadcrumbPage>{crumb}</BreadcrumbPage>
-                        ) : (
-                          <BreadcrumbLink
-                            onClick={(e: React.MouseEvent) => { e.preventDefault(); handleNavigate(prefix); }}
-                            href="#"
-                          >
-                            {crumb}
-                          </BreadcrumbLink>
-                        )}
-                      </BreadcrumbItem>
-                      {!isLast && <BreadcrumbSeparator />}
-                    </span>
-                  );
-                })}
-              </BreadcrumbList>
-            </Breadcrumb>
-          </CardTitle>
-          <div>
+              {breadcrumbs.map((crumb, idx) => {
+                const isLast = idx === breadcrumbs.length - 1;
+                const prefix = breadcrumbs.slice(0, idx + 1).join('/') + '/';
+                return (
+                  <span key={prefix} className="flex items-center gap-1 min-w-0">
+                    <BreadcrumbItem className="min-w-0">
+                      {isLast ? (
+                        <BreadcrumbPage className="truncate">{crumb}</BreadcrumbPage>
+                      ) : (
+                        <BreadcrumbLink
+                          onClick={(e: React.MouseEvent) => { e.preventDefault(); handleNavigate(prefix); }}
+                          href="#"
+                          className="truncate"
+                        >
+                          {crumb}
+                        </BreadcrumbLink>
+                      )}
+                    </BreadcrumbItem>
+                    {!isLast && <BreadcrumbSeparator className="text-muted-foreground/50">/</BreadcrumbSeparator>}
+                  </span>
+                );
+              })}
+            </BreadcrumbList>
+          </Breadcrumb>
+          <div className="shrink-0">
             <input
               type="file"
               ref={fileInputRef}
@@ -330,125 +328,136 @@ export function FileExplorer() {
               onClick={() => fileInputRef.current?.click()}
               disabled={isUploading || !activeBucketId}
             >
-              {isUploading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
-              <span className="hidden sm:inline">{isUploading ? 'Uploading...' : 'Upload File'}</span>
+              {isUploading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Upload className="w-4 h-4 mr-1.5" />}
+              <span className="hidden sm:inline">{isUploading ? 'Uploading...' : 'Upload'}</span>
             </Button>
           </div>
-        </CardHeader>
+        </div>
 
-        <CardContent className="p-0">
-          <div
-            className={`border-0 transition-colors ${isDragOver ? 'bg-blue-500/10 ring-2 ring-inset ring-blue-500/40' : ''}`}
-            onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
-            onDragLeave={() => setIsDragOver(false)}
-            onDrop={handleDrop}
-          >
-            <Table>
-              <TableHeader className="bg-slate-50/50 dark:bg-slate-800/50">
-                <TableRow>
-                  <TableHead className="w-[50%]"><SortHeader label="Name" sortKeyName="name" /></TableHead>
-                  <TableHead className="hidden sm:table-cell"><SortHeader label="Last Modified" sortKeyName="date" /></TableHead>
-                  <TableHead className="text-right"><SortHeader label="Size" sortKeyName="size" /></TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+        <div
+          className="relative"
+          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={handleDrop}
+        >
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-[50%] pl-4"><SortHeader label="Name" sortKeyName="name" /></TableHead>
+                <TableHead className="hidden sm:table-cell font-mono"><SortHeader label="Modified" sortKeyName="date" /></TableHead>
+                <TableHead className="text-right font-mono"><SortHeader label="Size" sortKeyName="size" /></TableHead>
+                <TableHead className="text-right pr-4">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {isLoadingObjects ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell colSpan={4} className="h-24 text-center">
+                    <Loader2 className="animate-spin w-5 h-5 mx-auto text-muted-foreground" />
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoadingObjects ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="h-24 text-center">
-                      <Loader2 className="animate-spin w-6 h-6 mx-auto text-slate-400" />
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  <>
-                    {currentPrefix && (
+              ) : (
+                <>
+                  {currentPrefix && (
+                    <TableRow
+                      onClick={handleNavigateUp}
+                      className="cursor-pointer"
+                    >
+                      <TableCell colSpan={4} className="pl-4">
+                        <span className="flex items-center gap-2">
+                          <Folder className="w-4 h-4 text-primary fill-primary/15" />
+                          <span className="font-medium text-muted-foreground">..</span>
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  )}
+
+                  {sortedFolders.map((folder: S3Folder) => {
+                    const folderName = folder.prefix.slice(currentPrefix.length, -1);
+                    return (
                       <TableRow
-                        onClick={handleNavigateUp}
-                        className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                        key={folder.prefix}
+                        onClick={() => handleNavigate(folder.prefix)}
+                        className="cursor-pointer"
                       >
-                        <TableCell colSpan={4} className="flex items-center gap-2">
-                          <Folder className="w-4 h-4 text-blue-500 fill-blue-500/20" />
-                          <span className="font-medium text-slate-600 dark:text-slate-300">..</span>
+                        <TableCell className="font-medium pl-4">
+                          <span className="flex items-center gap-2">
+                            <Folder className="w-4 h-4 text-primary fill-primary/15 shrink-0" />
+                            <span className="truncate">{folderName}</span>
+                          </span>
                         </TableCell>
+                        <TableCell className="hidden sm:table-cell text-muted-foreground font-mono text-xs">&mdash;</TableCell>
+                        <TableCell className="text-right text-muted-foreground font-mono text-xs">&mdash;</TableCell>
+                        <TableCell className="text-right pr-4"></TableCell>
                       </TableRow>
-                    )}
+                    );
+                  })}
 
-                    {sortedFolders.map((folder: S3Folder) => {
-                      const folderName = folder.prefix.slice(currentPrefix.length, -1);
-                      return (
-                        <TableRow
-                          key={folder.prefix}
-                          onClick={() => handleNavigate(folder.prefix)}
-                          className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
-                        >
-                          <TableCell className="font-medium flex items-center gap-2">
-                            <Folder className="w-4 h-4 text-blue-500 fill-blue-500/20" />
-                            {folderName}
-                          </TableCell>
-                          <TableCell className="hidden sm:table-cell text-slate-500">-</TableCell>
-                          <TableCell className="text-right text-slate-500">-</TableCell>
-                          <TableCell className="text-right"></TableCell>
-                        </TableRow>
-                      );
-                    })}
-
-                    {sortedObjects.map((obj: S3Object) => {
-                      const fileName = obj.key.slice(currentPrefix.length);
-                      const Icon = getFileIcon(fileName);
-                      return (
-                        <TableRow key={obj.key} className="group hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                          <TableCell className="font-medium flex items-center gap-2">
-                            <Icon className="w-4 h-4 text-slate-400" />
+                  {sortedObjects.map((obj: S3Object) => {
+                    const fileName = obj.key.slice(currentPrefix.length);
+                    const Icon = getFileIcon(fileName);
+                    return (
+                      <TableRow key={obj.key} className="group">
+                        <TableCell className="font-medium pl-4">
+                          <span className="flex items-center gap-2">
+                            <Icon className="w-4 h-4 text-muted-foreground shrink-0" />
                             <span className="truncate max-w-[150px] sm:max-w-[300px]">{fileName}</span>
-                          </TableCell>
-                          <TableCell className="hidden sm:table-cell text-slate-500 truncate">
-                            {new Date(obj.last_modified).toLocaleString()}
-                          </TableCell>
-                          <TableCell className="text-right text-slate-500 whitespace-nowrap">
-                            {formatSize(obj.size)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <div className="flex items-center justify-end gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={(e: React.MouseEvent) => handleDownload(obj.key, e)}
-                                title="Download"
-                              >
-                                <Download className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                                onClick={(e: React.MouseEvent) => requestDelete(obj.key, e)}
-                                title="Delete"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-
-                    {!sortedFolders.length && !sortedObjects.length && (
-                      <TableRow>
-                        <TableCell colSpan={4} className="h-32 text-center text-slate-500">
-                          <div className="flex flex-col items-center gap-2">
-                            <File className="w-8 h-8 opacity-20" />
-                            <p>{search ? 'No files match your search' : 'This folder is empty'}</p>
+                          </span>
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell text-muted-foreground font-mono text-xs truncate">
+                          {new Date(obj.last_modified).toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground font-mono text-xs whitespace-nowrap tabular-nums">
+                          {formatSize(obj.size)}
+                        </TableCell>
+                        <TableCell className="text-right pr-4">
+                          <div className="flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={(e: React.MouseEvent) => handleDownload(obj.key, e)}
+                              title="Download"
+                            >
+                              <Download className="w-4 h-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              onClick={(e: React.MouseEvent) => requestDelete(obj.key, e)}
+                              title="Delete"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
-                    )}
-                  </>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </CardContent>
-      </Card>
+                    );
+                  })}
+
+                  {!sortedFolders.length && !sortedObjects.length && (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
+                        <div className="flex flex-col items-center gap-2">
+                          <File className="w-7 h-7 opacity-30" />
+                          <p className="text-sm">{search ? 'No files match your search' : 'This folder is empty'}</p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </>
+              )}
+            </TableBody>
+          </Table>
+
+          {isDragOver && (
+            <div className="absolute inset-1 rounded-md border-2 border-dashed border-primary bg-primary/5 flex flex-col items-center justify-center gap-2 pointer-events-none">
+              <UploadCloud className="w-6 h-6 text-primary" />
+              <p className="text-sm font-medium text-primary">Drop to upload</p>
+            </div>
+          )}
+        </div>
+      </div>
 
       <AlertDialog open={!!pendingDeleteKey} onOpenChange={(open) => !open && setPendingDeleteKey(null)}>
         <AlertDialogContent>
