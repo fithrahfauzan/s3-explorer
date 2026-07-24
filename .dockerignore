@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.env
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env*
+
+# VCS / misc
+.git/
+.gitignore
+.DS_Store
