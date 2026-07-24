@@ -19,6 +19,9 @@ import {
   ArrowUp,
   ArrowDown,
   UploadCloud,
+  Copy,
+  Check,
+  Lock,
 } from 'lucide-react';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
@@ -36,6 +39,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast';
 
 type SortKey = 'name' | 'date' | 'size';
@@ -65,9 +77,21 @@ export function FileExplorer() {
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
+  const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const [uploadFileName, setUploadFileName] = useState('');
+  const [uploadResult, setUploadResult] = useState<{ key: string; url: string } | null>(null);
+  const [isGeneratingLink, setIsGeneratingLink] = useState(false);
+  const [copiedCurl, setCopiedCurl] = useState(false);
+  const [copiedUrl, setCopiedUrl] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const toast = useToast();
+
+  const { data: config } = useQuery({
+    queryKey: ['config'],
+    queryFn: s3Api.getConfig,
+  });
+  const restrictedMode = config?.restricted_mode ?? false;
 
   const { data: buckets, isLoading: isLoadingBuckets } = useQuery({
     queryKey: ['buckets'],
@@ -137,6 +161,33 @@ export function FileExplorer() {
     }
   };
 
+  const copyToClipboard = async (text: string, markCopied: (copied: boolean) => void) => {
+    try {
+      if (!navigator.clipboard) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(text);
+      markCopied(true);
+      setTimeout(() => markCopied(false), 1500);
+    } catch (error) {
+      console.error('Copy failed:', error);
+      toast.add({ title: 'Copy failed', description: 'Select and copy manually.', type: 'error' });
+    }
+  };
+
+  const generateUploadLink = async () => {
+    if (!activeBucketId || !uploadFileName.trim()) return;
+    try {
+      setIsGeneratingLink(true);
+      const key = currentPrefix + uploadFileName.trim();
+      const { url } = await s3Api.getUploadUrl(activeBucketId, key);
+      setUploadResult({ key, url });
+    } catch (error) {
+      console.error('Failed to generate upload link:', error);
+      toast.add({ title: 'Could not generate upload link', description: uploadFileName, type: 'error' });
+    } finally {
+      setIsGeneratingLink(false);
+    }
+  };
+
   const requestDelete = (key: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setPendingDeleteKey(key);
@@ -188,6 +239,7 @@ export function FileExplorer() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
+    if (restrictedMode) return;
     const file = e.dataTransfer.files?.[0];
     if (file && activeBucketId) uploadFile(file);
   };
@@ -236,6 +288,10 @@ export function FileExplorer() {
 
   const breadcrumbs = currentPrefix.split('/').filter(Boolean);
 
+  const curlCommand = uploadResult
+    ? `curl -X PUT --upload-file "/path/to/${uploadResult.key.split('/').pop()}" "${uploadResult.url}"`
+    : '';
+
   const SortHeader = ({ label, sortKeyName }: { label: string; sortKeyName: SortKey }) => (
     <button
       type="button"
@@ -249,6 +305,12 @@ export function FileExplorer() {
 
   return (
     <div className="flex flex-col gap-4 w-full max-w-6xl mx-auto p-4 md:p-8">
+      {restrictedMode && (
+        <div className="inline-flex w-fit items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-mono text-muted-foreground">
+          <Lock className="w-3 h-3" />
+          Restricted mode: uploads are manual-only, deletes are disabled
+        </div>
+      )}
       <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="relative w-full sm:w-[260px]">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
@@ -325,18 +387,29 @@ export function FileExplorer() {
               className="hidden"
             />
             <Button
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => {
+                if (restrictedMode) {
+                  setUploadFileName('');
+                  setUploadResult(null);
+                  setIsUploadDialogOpen(true);
+                } else {
+                  fileInputRef.current?.click();
+                }
+              }}
               disabled={isUploading || !activeBucketId}
+              title={restrictedMode ? 'Generate a presigned upload link' : 'Upload'}
             >
               {isUploading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Upload className="w-4 h-4 mr-1.5" />}
-              <span className="hidden sm:inline">{isUploading ? 'Uploading...' : 'Upload'}</span>
+              <span className="hidden sm:inline">
+                {restrictedMode ? 'Get upload link' : (isUploading ? 'Uploading...' : 'Upload')}
+              </span>
             </Button>
           </div>
         </div>
 
         <div
           className="relative"
-          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragOver={(e) => { e.preventDefault(); if (!restrictedMode) setIsDragOver(true); }}
           onDragLeave={() => setIsDragOver(false)}
           onDrop={handleDrop}
         >
@@ -420,15 +493,17 @@ export function FileExplorer() {
                             >
                               <Download className="w-4 h-4" />
                             </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-                              onClick={(e: React.MouseEvent) => requestDelete(obj.key, e)}
-                              title="Delete"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
+                            {!restrictedMode && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                onClick={(e: React.MouseEvent) => requestDelete(obj.key, e)}
+                                title="Delete"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -473,6 +548,104 @@ export function FileExplorer() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={isUploadDialogOpen}
+        onOpenChange={(open) => {
+          setIsUploadDialogOpen(open);
+          if (!open) {
+            setUploadFileName('');
+            setUploadResult(null);
+            setCopiedCurl(false);
+            setCopiedUrl(false);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Manual upload required</DialogTitle>
+            <DialogDescription>
+              Restricted mode only generates a presigned link — the browser never uploads anything itself.
+              {!uploadResult && ' Enter the destination filename to generate a link, then upload it yourself.'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {!uploadResult ? (
+            <div className="mt-2 flex flex-col gap-2">
+              <span className="font-mono text-xs text-muted-foreground truncate">
+                s3://{activeBucket?.bucket_name}/{currentPrefix}
+              </span>
+              <Input
+                autoFocus
+                value={uploadFileName}
+                onChange={(e) => setUploadFileName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') generateUploadLink(); }}
+                placeholder="filename.ext"
+                className="font-mono text-xs"
+              />
+              <DialogFooter>
+                <DialogClose>Cancel</DialogClose>
+                <Button onClick={generateUploadLink} disabled={!uploadFileName.trim() || isGeneratingLink}>
+                  {isGeneratingLink && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
+                  Generate link
+                </Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="mt-2 flex flex-col gap-4">
+              <div>
+                <p className="mb-1.5 text-xs text-muted-foreground">
+                  curl command &mdash; replace the placeholder path with your actual file:
+                </p>
+                <div className="relative">
+                  <pre className="max-h-40 overflow-auto rounded-md bg-muted p-3 pr-12 font-mono text-xs whitespace-pre-wrap break-all">
+                    {curlCommand}
+                  </pre>
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    className="absolute top-2 right-2"
+                    onClick={() => copyToClipboard(curlCommand, setCopiedCurl)}
+                    title="Copy curl command"
+                  >
+                    {copiedCurl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  </Button>
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-1.5 text-xs text-muted-foreground">Presigned URL only:</p>
+                <div className="relative">
+                  <textarea
+                    readOnly
+                    rows={3}
+                    value={uploadResult.url}
+                    onFocus={(e) => e.target.select()}
+                    className="w-full resize-none rounded-md border border-border bg-muted p-3 pr-12 font-mono text-xs break-all outline-none"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon-sm"
+                    className="absolute top-2 right-2"
+                    onClick={() => copyToClipboard(uploadResult.url, setCopiedUrl)}
+                    title="Copy URL"
+                  >
+                    {copiedUrl ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  </Button>
+                </div>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                Uploading to <code className="text-foreground">{uploadResult.key}</code>. The link expires in 1 hour.
+              </p>
+
+              <DialogFooter>
+                <DialogClose>Close</DialogClose>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

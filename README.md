@@ -58,6 +58,17 @@ This makes it extremely flexible for both local development and secure cloud dep
 | Variable | Default | Description |
 |---|---|---|
 | `CORS_ORIGINS` | `["*"]` | Origins allowed to call the API. Only matters when the frontend is served from a different origin than the backend (e.g. running `make dev-frontend` separately) — set this to your frontend's URL in that case. |
+| `RESTRICTED_MODE` | `false` | Global, app-wide safety mode (applies to every configured bucket). See below. |
+
+### Restricted Mode
+
+Set `RESTRICTED_MODE=true` to lock the whole app down to a read-mostly workflow:
+
+- **Delete is disabled.** The delete button is hidden in the UI, and the backend rejects `DELETE /api/buckets/{id}/objects` with `403` regardless of what the frontend sends.
+- **Download works as normal** (direct presigned-URL download).
+- **Upload never happens through the browser.** Clicking "Get upload link" (or dropping a file) only generates a presigned `PUT` URL and shows it in a popup with a ready-to-run `curl` command (with a copy-to-clipboard button). The user runs the command themselves to actually push the file to S3 — the backend and browser never see the file's bytes.
+
+This is useful for environments where you want people to be able to browse/fetch objects and hand out one-off upload links, without giving the web app itself the ability to delete data or move file bytes through the browser.
 
 ---
 

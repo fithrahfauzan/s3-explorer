@@ -35,15 +35,22 @@ def get_bucket_config(bucket_id: str) -> BucketConfig:
     return bucket
 
 def get_s3_client(bucket_config: BucketConfig):
+    # Force the region-specific endpoint. Without it, boto3 presigns against
+    # the legacy global host (bucket.s3.amazonaws.com), which opt-in regions
+    # (e.g. ap-southeast-3) reject with IllegalLocationConstraintException —
+    # the S3 API calls made directly by this client still succeed (they use
+    # region_name correctly), so only presigned URLs silently break.
+    endpoint_url = f"https://s3.{bucket_config.region}.amazonaws.com"
     if bucket_config.auth_type == "manual":
         return boto3.client(
             "s3",
             region_name=bucket_config.region,
+            endpoint_url=endpoint_url,
             aws_access_key_id=bucket_config.access_key,
             aws_secret_access_key=bucket_config.secret_key
         )
     else:
-        return boto3.client("s3", region_name=bucket_config.region)
+        return boto3.client("s3", region_name=bucket_config.region, endpoint_url=endpoint_url)
 
 class UploadRequest(BaseModel):
     key: str
@@ -55,6 +62,11 @@ class DownloadRequest(BaseModel):
 def health_check() -> Dict[str, Any]:
     """Basic liveness/readiness probe"""
     return {"status": "ok", "buckets_configured": len(settings.load_buckets())}
+
+@app.get("/api/config")
+def get_config() -> Dict[str, Any]:
+    """Global app-wide UI/behavior flags"""
+    return {"restricted_mode": settings.RESTRICTED_MODE}
 
 @app.get("/api/buckets")
 def list_buckets() -> List[Dict[str, Any]]:
@@ -112,6 +124,19 @@ def get_upload_url(bucket_id: str, request: UploadRequest):
     bucket = get_bucket_config(bucket_id)
     s3 = get_s3_client(bucket)
     try:
+        if settings.RESTRICTED_MODE:
+            # A single presigned PUT URL is what a plain `curl -X PUT` can hit
+            # directly; a presigned POST would require the caller to also
+            # replicate every form field, which doesn't fit a manual-upload
+            # workflow. Leave Content-Type unsigned so any curl invocation
+            # works regardless of what Content-Type it sends.
+            url = s3.generate_presigned_url(
+                'put_object',
+                Params={'Bucket': bucket.bucket_name, 'Key': request.key},
+                ExpiresIn=3600
+            )
+            return PresignedUrl(url=url)
+
         # Generate presigned POST URL
         response = s3.generate_presigned_post(
             Bucket=bucket.bucket_name,
@@ -142,6 +167,8 @@ def get_download_url(bucket_id: str, request: DownloadRequest):
 @app.delete("/api/buckets/{bucket_id}/objects")
 def delete_object(bucket_id: str, key: str = Query(...)):
     """Delete an object from a bucket"""
+    if settings.RESTRICTED_MODE:
+        raise HTTPException(status_code=403, detail="Delete is disabled in restricted mode")
     bucket = get_bucket_config(bucket_id)
     s3 = get_s3_client(bucket)
     try:

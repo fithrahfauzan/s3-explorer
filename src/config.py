@@ -17,7 +17,11 @@ class BucketConfig(BaseModel):
 
 class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["*"]
-    
+    # Global app mode. When True: delete is disabled everywhere, and uploads
+    # only ever hand back a presigned URL for the user to use manually
+    # (e.g. via curl) instead of the backend/browser performing the upload.
+    RESTRICTED_MODE: bool = False
+
     def load_buckets(self) -> List[BucketConfig]:
         buckets = []
         # Find all bucket indices from env vars

@@ -30,7 +30,16 @@ export interface PresignedUrl {
   fields?: Record<string, string>;
 }
 
+export interface AppConfig {
+  restricted_mode: boolean;
+}
+
 export const s3Api = {
+  getConfig: async (): Promise<AppConfig> => {
+    const { data } = await api.get('/config');
+    return data;
+  },
+
   getBuckets: async (): Promise<Bucket[]> => {
     const { data } = await api.get('/buckets');
     return data;
