@@ -2,7 +2,27 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '/api',
+  withCredentials: true,
 });
+
+// Lets the app react immediately when a session expires mid-use (any
+// protected call starts 401ing) instead of waiting for the next manual
+// auth-status refetch. Registered once near the app root.
+type UnauthorizedHandler = () => void;
+let onUnauthorized: UnauthorizedHandler | null = null;
+export const setUnauthorizedHandler = (handler: UnauthorizedHandler | null) => {
+  onUnauthorized = handler;
+};
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401 && !error.config?.url?.includes('/auth/login')) {
+      onUnauthorized?.();
+    }
+    return Promise.reject(error);
+  }
+);
 
 export interface Bucket {
   id: string;
@@ -33,6 +53,26 @@ export interface PresignedUrl {
 export interface AppConfig {
   restricted_mode: boolean;
 }
+
+export interface AuthStatus {
+  auth_enabled: boolean;
+  authenticated: boolean;
+}
+
+export const authApi = {
+  getStatus: async (): Promise<AuthStatus> => {
+    const { data } = await api.get('/auth/status');
+    return data;
+  },
+
+  login: async (password: string): Promise<void> => {
+    await api.post('/auth/login', { password });
+  },
+
+  logout: async (): Promise<void> => {
+    await api.post('/auth/logout');
+  },
+};
 
 export const s3Api = {
   getConfig: async (): Promise<AppConfig> => {

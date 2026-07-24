@@ -59,6 +59,9 @@ This makes it extremely flexible for both local development and secure cloud dep
 |---|---|---|
 | `CORS_ORIGINS` | `["*"]` | Origins allowed to call the API. Only matters when the frontend is served from a different origin than the backend (e.g. running `make dev-frontend` separately) — set this to your frontend's URL in that case. |
 | `RESTRICTED_MODE` | `false` | Global, app-wide safety mode (applies to every configured bucket). See below. |
+| `AUTH_PASSWORD` | unset | Enables the login page. See below. |
+| `SESSION_SECRET` | random per process start | Signs the session cookie. See below. |
+| `SESSION_SECURE_COOKIE` | `true` | Marks the session cookie `Secure` (HTTPS-only). Set to `false` for local HTTP-only development. |
 
 ### Restricted Mode
 
@@ -69,6 +72,18 @@ Set `RESTRICTED_MODE=true` to lock the whole app down to a read-mostly workflow:
 - **Upload never happens through the browser.** Clicking "Get upload link" (or dropping a file) only generates a presigned `PUT` URL and shows it in a popup with a ready-to-run `curl` command (with a copy-to-clipboard button). The user runs the command themselves to actually push the file to S3 — the backend and browser never see the file's bytes.
 
 This is useful for environments where you want people to be able to browse/fetch objects and hand out one-off upload links, without giving the web app itself the ability to delete data or move file bytes through the browser.
+
+### Login (`AUTH_PASSWORD`)
+
+Set `AUTH_PASSWORD` to require a password before the app (and every `/api` route except `/api/health` and `/api/auth/*`) becomes usable. Leaving it unset disables login entirely — the app behaves exactly as before.
+
+It's intentionally simple (one shared password, no usernames/accounts) but not naive about it:
+- The password is compared with a constant-time comparison, not `==` (avoids timing side-channels).
+- A successful login sets an `HttpOnly`, `SameSite=Lax`, and (by default) `Secure` session cookie — never readable from JS, and the backend never stores the password or session state server-side; the cookie itself is an HMAC-signed, expiring token (`SESSION_SECRET` is the signing key).
+- Failed login attempts are rate-limited (5 per minute per client IP) to slow down brute-forcing.
+- Every protected endpoint re-validates the session server-side — hiding UI elements is not the enforcement mechanism.
+
+**`SESSION_SECRET` matters if you run more than one backend replica** (e.g. multiple pods behind a load balancer): each process generates its own random secret by default, so a cookie signed by replica A won't validate on replica B, and users will get randomly bounced back to the login page depending on which pod handles the request. Set `SESSION_SECRET` explicitly (a long random string) in any multi-replica deployment, and also set it if you want sessions to survive a restart.
 
 ---
 

@@ -1,4 +1,5 @@
 import os
+import secrets
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
@@ -21,6 +22,19 @@ class Settings(BaseSettings):
     # only ever hand back a presigned URL for the user to use manually
     # (e.g. via curl) instead of the backend/browser performing the upload.
     RESTRICTED_MODE: bool = False
+
+    # When set, every /api route (except /api/health and /api/auth/*)
+    # requires a valid session cookie obtained by posting this password to
+    # /api/auth/login. Leave unset to disable auth entirely (open access) —
+    # useful for local dev, but should always be set in any shared deployment.
+    AUTH_PASSWORD: Optional[str] = None
+    # Signs the session cookie. Auto-generated per process start if not
+    # given, which means every restart invalidates existing sessions — set
+    # this explicitly to keep sessions alive across restarts/replicas.
+    SESSION_SECRET: str = Field(default_factory=lambda: secrets.token_hex(32))
+    # Marks the session cookie Secure (HTTPS-only). Only turn this off for
+    # local development over plain HTTP.
+    SESSION_SECURE_COOKIE: bool = True
 
     def load_buckets(self) -> List[BucketConfig]:
         buckets = []
