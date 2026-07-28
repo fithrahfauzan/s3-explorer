@@ -11,7 +11,7 @@ image:
 
   # -- Kubernetes image pull policy.
   # Valid values: Always, IfNotPresent, Never.
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
 
   # -- Image tag. Defaults to Chart.appVersion if omitted.
   tag: "latest"
