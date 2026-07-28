@@ -7,8 +7,10 @@ A modern, fast, and secure web application for browsing and managing AWS S3 buck
 - **Multi-Bucket Support with Scoped Credentials:** Configure multiple buckets easily using your `.env` file. Each bucket can have its own isolated IAM credentials (either manual Access Keys or inherited seamlessly via Boto3's default provider chain). 
 - **No Global Permissions Needed:** Because buckets are explicitly configured and selectable via a UI dropdown, the application never needs to call `ListBuckets` globally.
 - **Direct S3 Uploads/Downloads:** The backend generates secure Presigned URLs. The frontend uses these to stream file uploads and downloads directly to/from AWS S3, bypassing the backend server to save bandwidth and improve performance. Drag-and-drop onto the file table works as well as the upload button.
+- **Get Upload Link:** Alongside the normal browser upload, any user can generate a manual presigned `PUT` link (with a ready-to-run `curl` command) to hand off or run themselves — available in both restricted and unrestricted mode.
 - **Search, Sort & File-Type Icons:** Filter the current folder by name, click a column header to sort by name/date/size, and files show an icon based on their extension.
 - **Toasts & Confirm Dialogs:** Upload/download/delete feedback is shown via toast notifications, and deletes require confirmation in a proper dialog (no native browser popups).
+- **Multi-Profile Login:** Configure more than one login password, each with its own restricted-mode access level baked into its session — e.g. one full-access login and one restricted-only login on the same deployment.
 - **Modern Tech Stack:**
   - **Frontend:** React, Vite, TypeScript, TanStack Query, and **shadcn/ui** components.
   - **Backend:** Python, FastAPI, and `boto3` (managed via `uv`).
@@ -58,28 +60,45 @@ This makes it extremely flexible for both local development and secure cloud dep
 | Variable | Default | Description |
 |---|---|---|
 | `CORS_ORIGINS` | `["*"]` | Origins allowed to call the API. Only matters when the frontend is served from a different origin than the backend (e.g. running `make dev-frontend` separately) — set this to your frontend's URL in that case. |
-| `RESTRICTED_MODE` | `false` | Global, app-wide safety mode (applies to every configured bucket). See below. |
-| `AUTH_PASSWORD` | unset | Enables the login page. See below. |
+| `RESTRICTED_MODE` | `false` | Global, app-wide safety mode (applies to every configured bucket). Used as a fallback when no login profiles are configured, or when auth is off entirely. See below. |
+| `AUTH_PASSWORD` | unset | Enables the login page with a single shared password using `RESTRICTED_MODE`. Ignored if any `AUTH_PROFILE_N_PASSWORD` is set. See below. |
+| `AUTH_PROFILE_{N}_PASSWORD` / `AUTH_PROFILE_{N}_RESTRICTED_MODE` | unset | Multiple login profiles, each with its own password and restricted-mode flag. See below. |
 | `SESSION_SECRET` | random per process start | Signs the session cookie. See below. |
 | `SESSION_SECURE_COOKIE` | `true` | Marks the session cookie `Secure` (HTTPS-only). Set to `false` for local HTTP-only development. |
 
 ### Restricted Mode
 
-Set `RESTRICTED_MODE=true` to lock the whole app down to a read-mostly workflow:
+Set `RESTRICTED_MODE=true` (globally, or per login profile — see below) to lock that session down to a read-mostly workflow:
 
 - **Delete is disabled.** The delete button is hidden in the UI, and the backend rejects `DELETE /api/buckets/{id}/objects` with `403` regardless of what the frontend sends.
 - **Download works as normal** (direct presigned-URL download).
-- **Upload never happens through the browser.** Clicking "Get upload link" (or dropping a file) only generates a presigned `PUT` URL and shows it in a popup with a ready-to-run `curl` command (with a copy-to-clipboard button). The user runs the command themselves to actually push the file to S3 — the backend and browser never see the file's bytes.
+- **Upload never happens through the browser.** Dropping a file onto the table, or clicking the plain "Upload" button, isn't available — the only way to get a file in is "Get upload link" (see below), which the user runs themselves via `curl`. The backend and browser never see the file's bytes.
 
 This is useful for environments where you want people to be able to browse/fetch objects and hand out one-off upload links, without giving the web app itself the ability to delete data or move file bytes through the browser.
 
-### Login (`AUTH_PASSWORD`)
+### Get Upload Link
 
-Set `AUTH_PASSWORD` to require a password before the app (and every `/api` route except `/api/health` and `/api/auth/*`) becomes usable. Leaving it unset disables login entirely — the app behaves exactly as before.
+The "Get upload link" button generates a presigned `PUT` URL and shows it in a popup with a ready-to-run `curl` command (with a copy-to-clipboard button) — the user runs the command themselves to push the file to S3. Unlike the rest of restricted mode, **this is always available**, in both restricted and unrestricted sessions: it sits next to the normal drag-and-drop/"Upload" button when unrestricted, and is the only upload path when restricted.
 
-It's intentionally simple (one shared password, no usernames/accounts) but not naive about it:
-- The password is compared with a constant-time comparison, not `==` (avoids timing side-channels).
-- A successful login sets an `HttpOnly`, `SameSite=Lax`, and (by default) `Secure` session cookie — never readable from JS, and the backend never stores the password or session state server-side; the cookie itself is an HMAC-signed, expiring token (`SESSION_SECRET` is the signing key).
+### Login (`AUTH_PASSWORD` / multi-profile)
+
+Set `AUTH_PASSWORD` (single shared password) or one or more `AUTH_PROFILE_{N}_PASSWORD` variables to require a password before the app (and every `/api` route except `/api/health` and `/api/auth/*`) becomes usable. Leaving both unset disables login entirely — the app behaves exactly as before.
+
+**Multiple profiles**, each with its own independent `restricted_mode`, let you run one deployment with different access levels per password — e.g. a full-access login and a restricted-only login side by side:
+
+```env
+AUTH_PROFILE_1_PASSWORD=full-access-password
+AUTH_PROFILE_1_RESTRICTED_MODE=false
+
+AUTH_PROFILE_2_PASSWORD=restricted-password
+AUTH_PROFILE_2_RESTRICTED_MODE=true
+```
+
+Whichever password is used to log in determines that session's `restricted_mode` — it's signed into the session cookie at login time, not read from the global `RESTRICTED_MODE` on every request, so one profile's access level can't leak into another's. `AUTH_PASSWORD` still works as a single-profile fallback (using the global `RESTRICTED_MODE`) when no `AUTH_PROFILE_{N}_PASSWORD` is set — but is ignored entirely once any profile is configured (they don't stack).
+
+Auth itself is intentionally simple (shared passwords, no usernames/accounts) but not naive about it:
+- Passwords are compared with a constant-time comparison, not `==` (avoids timing side-channels), and every configured profile is checked (no early exit) so response time doesn't hint at which profile it's checked against.
+- A successful login sets an `HttpOnly`, `SameSite=Lax`, and (by default) `Secure` session cookie — never readable from JS, and the backend never stores the password or session state server-side; the cookie itself is an HMAC-signed, expiring token (`SESSION_SECRET` is the signing key) carrying only an expiry and the profile's `restricted_mode`.
 - Failed login attempts are rate-limited (5 per minute per client IP) to slow down brute-forcing.
 - Every protected endpoint re-validates the session server-side — hiding UI elements is not the enforcement mechanism.
 
