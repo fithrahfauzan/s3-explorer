@@ -22,6 +22,7 @@ import {
   Copy,
   Check,
   Lock,
+  Link,
 } from 'lucide-react';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
@@ -178,7 +179,7 @@ export function FileExplorer() {
     try {
       setIsGeneratingLink(true);
       const key = currentPrefix + uploadFileName.trim();
-      const { url } = await s3Api.getUploadUrl(activeBucketId, key);
+      const { url } = await s3Api.getUploadUrl(activeBucketId, key, true);
       setUploadResult({ key, url });
     } catch (error) {
       console.error('Failed to generate upload link:', error);
@@ -379,30 +380,35 @@ export function FileExplorer() {
               })}
             </BreadcrumbList>
           </Breadcrumb>
-          <div className="shrink-0">
+          <div className="shrink-0 flex items-center gap-2">
             <input
               type="file"
               ref={fileInputRef}
               onChange={handleFileUpload}
               className="hidden"
             />
+            {!restrictedMode && (
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading || !activeBucketId}
+                title="Upload"
+              >
+                {isUploading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Upload className="w-4 h-4 mr-1.5" />}
+                <span className="hidden sm:inline">{isUploading ? 'Uploading...' : 'Upload'}</span>
+              </Button>
+            )}
             <Button
+              variant={restrictedMode ? 'default' : 'outline'}
               onClick={() => {
-                if (restrictedMode) {
-                  setUploadFileName('');
-                  setUploadResult(null);
-                  setIsUploadDialogOpen(true);
-                } else {
-                  fileInputRef.current?.click();
-                }
+                setUploadFileName('');
+                setUploadResult(null);
+                setIsUploadDialogOpen(true);
               }}
-              disabled={isUploading || !activeBucketId}
-              title={restrictedMode ? 'Generate a presigned upload link' : 'Upload'}
+              disabled={!activeBucketId}
+              title="Generate a presigned upload link"
             >
-              {isUploading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Upload className="w-4 h-4 mr-1.5" />}
-              <span className="hidden sm:inline">
-                {restrictedMode ? 'Get upload link' : (isUploading ? 'Uploading...' : 'Upload')}
-              </span>
+              <Link className="w-4 h-4 mr-1.5" />
+              <span className="hidden sm:inline">Get upload link</span>
             </Button>
           </div>
         </div>
@@ -563,9 +569,9 @@ export function FileExplorer() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Manual upload required</DialogTitle>
+            <DialogTitle>Get upload link</DialogTitle>
             <DialogDescription>
-              Restricted mode only generates a presigned link — the browser never uploads anything itself.
+              Generates a presigned link — the browser never uploads anything itself.
               {!uploadResult && ' Enter the destination filename to generate a link, then upload it yourself.'}
             </DialogDescription>
           </DialogHeader>

@@ -32,30 +32,47 @@ def _sign(payload_b64: str) -> str:
     return _b64encode(signature)
 
 
-def create_session_token() -> str:
-    payload = {"exp": int(time.time()) + SESSION_TTL_SECONDS}
+def create_session_token(restricted_mode: bool) -> str:
+    # restricted_mode is baked into the signed payload at login time, tied to
+    # whichever profile's password was used — the session can't be replayed
+    # to claim a different (e.g. less restricted) access level later.
+    payload = {"exp": int(time.time()) + SESSION_TTL_SECONDS, "restricted_mode": restricted_mode}
     payload_b64 = _b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     return f"{payload_b64}.{_sign(payload_b64)}"
 
 
-def verify_session_token(token: Optional[str]) -> bool:
+def decode_session_token(token: Optional[str]) -> Optional[dict]:
+    """Returns the verified payload, or None if the token is missing,
+    tampered with, or expired."""
     if not token or "." not in token:
-        return False
+        return None
     payload_b64, _, signature_b64 = token.partition(".")
     if not hmac.compare_digest(_sign(payload_b64), signature_b64):
-        return False
+        return None
     try:
         payload = json.loads(_b64decode(payload_b64))
-        return int(payload.get("exp", 0)) > int(time.time())
     except (ValueError, json.JSONDecodeError):
-        return False
+        return None
+    if int(payload.get("exp", 0)) <= int(time.time()):
+        return None
+    return payload
 
 
-def check_password(candidate: str) -> bool:
-    expected = settings.AUTH_PASSWORD
-    if not expected:
-        return False
-    return hmac.compare_digest(candidate.encode("utf-8"), expected.encode("utf-8"))
+def verify_session_token(token: Optional[str]) -> bool:
+    return decode_session_token(token) is not None
+
+
+def check_password(candidate: str) -> Optional[bool]:
+    """Checks candidate against every configured auth profile (no early
+    exit, so response time doesn't hint at which profile it's checked
+    against) and returns the matched profile's restricted_mode, or None if
+    no profile matches."""
+    matched_restricted_mode: Optional[bool] = None
+    candidate_bytes = candidate.encode("utf-8")
+    for profile in settings.load_auth_profiles():
+        if hmac.compare_digest(candidate_bytes, profile.password.encode("utf-8")):
+            matched_restricted_mode = profile.restricted_mode
+    return matched_restricted_mode
 
 
 def is_rate_limited(client_id: str) -> bool:

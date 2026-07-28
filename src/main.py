@@ -15,9 +15,9 @@ from src.auth import (
     SESSION_TTL_SECONDS,
     check_password,
     create_session_token,
+    decode_session_token,
     is_rate_limited,
     record_login_attempt,
-    verify_session_token,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -37,15 +37,28 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-def require_auth(session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME)) -> None:
-    # No AUTH_PASSWORD configured means auth is opt-in and currently off.
-    if not settings.AUTH_PASSWORD:
+def get_session_payload(session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME)) -> Optional[Dict[str, Any]]:
+    return decode_session_token(session)
+
+def require_auth(payload: Optional[Dict[str, Any]] = Depends(get_session_payload)) -> None:
+    # No auth profiles configured means auth is opt-in and currently off.
+    if not settings.load_auth_profiles():
         return
-    if not verify_session_token(session):
+    if payload is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-# Every route below requires a valid session (unless AUTH_PASSWORD is unset).
-# /api/health and /api/auth/* are registered directly on `app` and stay public.
+def get_restricted_mode(payload: Optional[Dict[str, Any]] = Depends(get_session_payload)) -> bool:
+    # Only fall back to the global flag when auth is off entirely (no
+    # profiles configured) — an authenticated request always defers to the
+    # restricted_mode baked into its own signed session, never the global
+    # default, so one profile's access level can't leak into another's.
+    if not settings.load_auth_profiles():
+        return settings.RESTRICTED_MODE
+    return bool(payload.get("restricted_mode", settings.RESTRICTED_MODE)) if payload else settings.RESTRICTED_MODE
+
+# Every route below requires a valid session (unless no auth profiles are
+# configured). /api/health and /api/auth/* are registered directly on `app`
+# and stay public.
 protected = APIRouter(dependencies=[Depends(require_auth)])
 
 def get_bucket_config(bucket_id: str) -> BucketConfig:
@@ -75,6 +88,10 @@ def get_s3_client(bucket_config: BucketConfig):
 
 class UploadRequest(BaseModel):
     key: str
+    # Forces a plain presigned PUT URL (for manual/curl upload) regardless of
+    # the session's restricted_mode, so the "Get upload link" action works
+    # the same way in both restricted and unrestricted sessions.
+    manual: bool = False
 
 class DownloadRequest(BaseModel):
     key: str
@@ -88,15 +105,15 @@ class LoginRequest(BaseModel):
     password: str
 
 @app.get("/api/auth/status")
-def auth_status(session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME)) -> Dict[str, Any]:
+def auth_status(payload: Optional[Dict[str, Any]] = Depends(get_session_payload)) -> Dict[str, Any]:
     """Whether auth is enabled at all, and whether this client is currently authenticated"""
-    if not settings.AUTH_PASSWORD:
+    if not settings.load_auth_profiles():
         return {"auth_enabled": False, "authenticated": True}
-    return {"auth_enabled": True, "authenticated": verify_session_token(session)}
+    return {"auth_enabled": True, "authenticated": payload is not None}
 
 @app.post("/api/auth/login")
 def login(login_request: LoginRequest, http_request: Request, response: Response) -> Dict[str, Any]:
-    if not settings.AUTH_PASSWORD:
+    if not settings.load_auth_profiles():
         raise HTTPException(status_code=400, detail="Auth is not configured")
 
     # Keyed on the peer IP as FastAPI sees it (the proxy/ingress IP if
@@ -106,14 +123,15 @@ def login(login_request: LoginRequest, http_request: Request, response: Response
     if is_rate_limited(client_id):
         raise HTTPException(status_code=429, detail="Too many attempts. Try again in a minute.")
 
-    if not check_password(login_request.password):
+    restricted_mode = check_password(login_request.password)
+    if restricted_mode is None:
         record_login_attempt(client_id)
         logger.warning("Failed login attempt from %s", client_id)
         raise HTTPException(status_code=401, detail="Invalid password")
 
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
-        value=create_session_token(),
+        value=create_session_token(restricted_mode),
         max_age=SESSION_TTL_SECONDS,
         httponly=True,
         secure=settings.SESSION_SECURE_COOKIE,
@@ -133,9 +151,9 @@ def logout(response: Response) -> Dict[str, Any]:
     return {"message": "ok"}
 
 @protected.get("/api/config")
-def get_config() -> Dict[str, Any]:
-    """Global app-wide UI/behavior flags"""
-    return {"restricted_mode": settings.RESTRICTED_MODE}
+def get_config(restricted_mode: bool = Depends(get_restricted_mode)) -> Dict[str, Any]:
+    """App-wide UI/behavior flags for the current session"""
+    return {"restricted_mode": restricted_mode}
 
 @protected.get("/api/buckets")
 def list_buckets() -> List[Dict[str, Any]]:
@@ -188,12 +206,12 @@ class PresignedUrl(BaseModel):
     fields: Optional[Dict[str, str]] = None
 
 @protected.post("/api/buckets/{bucket_id}/upload-url", response_model=PresignedUrl)
-def get_upload_url(bucket_id: str, request: UploadRequest):
+def get_upload_url(bucket_id: str, request: UploadRequest, restricted_mode: bool = Depends(get_restricted_mode)):
     """Generate a presigned URL for uploading a file"""
     bucket = get_bucket_config(bucket_id)
     s3 = get_s3_client(bucket)
     try:
-        if settings.RESTRICTED_MODE:
+        if restricted_mode or request.manual:
             # A single presigned PUT URL is what a plain `curl -X PUT` can hit
             # directly; a presigned POST would require the caller to also
             # replicate every form field, which doesn't fit a manual-upload
@@ -234,9 +252,9 @@ def get_download_url(bucket_id: str, request: DownloadRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 @protected.delete("/api/buckets/{bucket_id}/objects")
-def delete_object(bucket_id: str, key: str = Query(...)):
+def delete_object(bucket_id: str, key: str = Query(...), restricted_mode: bool = Depends(get_restricted_mode)):
     """Delete an object from a bucket"""
-    if settings.RESTRICTED_MODE:
+    if restricted_mode:
         raise HTTPException(status_code=403, detail="Delete is disabled in restricted mode")
     bucket = get_bucket_config(bucket_id)
     s3 = get_s3_client(bucket)

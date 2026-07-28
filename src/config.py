@@ -16,6 +16,10 @@ class BucketConfig(BaseModel):
     access_key: Optional[str] = None
     secret_key: Optional[str] = None
 
+class AuthProfile(BaseModel):
+    password: str
+    restricted_mode: bool
+
 class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["*"]
     # Global app mode. When True: delete is disabled everywhere, and uploads
@@ -27,6 +31,8 @@ class Settings(BaseSettings):
     # requires a valid session cookie obtained by posting this password to
     # /api/auth/login. Leave unset to disable auth entirely (open access) —
     # useful for local dev, but should always be set in any shared deployment.
+    # Superseded by AUTH_PROFILE_N_PASSWORD below when any are configured;
+    # kept as a single-profile fallback using the global RESTRICTED_MODE.
     AUTH_PASSWORD: Optional[str] = None
     # Signs the session cookie. Auto-generated per process start if not
     # given, which means every restart invalidates existing sessions — set
@@ -60,6 +66,33 @@ class Settings(BaseSettings):
                 )
                 buckets.append(bucket)
         return buckets
+
+    def load_auth_profiles(self) -> List[AuthProfile]:
+        """Each profile is its own login password paired with its own
+        restricted_mode, so different users can be granted different access
+        levels (e.g. one full-access login, one restricted-only login)
+        instead of sharing one global RESTRICTED_MODE for every session."""
+        profiles = []
+        indices = set()
+        for key in os.environ:
+            if key.startswith("AUTH_PROFILE_") and key.endswith("_PASSWORD"):
+                parts = key.split("_")
+                # Expected format: AUTH_PROFILE_{INDEX}_PASSWORD
+                if len(parts) >= 4:
+                    indices.add(parts[2])
+
+        for idx in sorted(indices):
+            prefix = f"AUTH_PROFILE_{idx}_"
+            password = os.environ.get(f"{prefix}PASSWORD")
+            if password:
+                restricted_mode = os.environ.get(f"{prefix}RESTRICTED_MODE", "false").strip().lower() == "true"
+                profiles.append(AuthProfile(password=password, restricted_mode=restricted_mode))
+
+        if not profiles and self.AUTH_PASSWORD:
+            # Legacy single-password setup: one profile using the global flag.
+            profiles.append(AuthProfile(password=self.AUTH_PASSWORD, restricted_mode=self.RESTRICTED_MODE))
+
+        return profiles
 
     class Config:
         env_file = ".env"

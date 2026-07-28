@@ -13,3 +13,4 @@ frontend/.env*
 .git/
 .gitignore
 .DS_Store
+.token

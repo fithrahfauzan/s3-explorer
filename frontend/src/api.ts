@@ -92,8 +92,8 @@ export const s3Api = {
     return data;
   },
 
-  getUploadUrl: async (bucketId: string, key: string): Promise<PresignedUrl> => {
-    const { data } = await api.post(`/buckets/${bucketId}/upload-url`, { key });
+  getUploadUrl: async (bucketId: string, key: string, manual: boolean = false): Promise<PresignedUrl> => {
+    const { data } = await api.post(`/buckets/${bucketId}/upload-url`, { key, manual });
     return data;
   },
 
