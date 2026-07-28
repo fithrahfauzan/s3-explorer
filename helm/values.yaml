@@ -97,7 +97,7 @@ configMap:
 
   # -- Key/value pairs stored in the ConfigMap.
   data: 
-    RESTRICTED_MODE: true
+    RESTRICTED_MODE: 'true'
     BUCKET_1_ID: internal-bucket
     BUCKET_1_NAME: cimbocto-private-asset
     BUCKET_1_REGION: ap-southeast-3
