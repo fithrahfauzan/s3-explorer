@@ -1,0 +1,25 @@
+{{- if .Values.service.enabled}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "s3-explorer.fullname" . }}
+  labels:
+    {{- include "s3-explorer.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    {{- range .Values.ports}}
+    - port: {{ .servicePort }}
+      targetPort: {{ .name }}
+      protocol: {{ .protocol }}
+      name: {{ .name }}
+    {{- end }}
+    {{- range .Values.service.additionalPorts }}
+    - port: {{ .servicePort }}
+      targetPort: {{ .name }}
+      protocol: {{ .protocol }}
+      name: {{ .name }}
+    {{- end }}
+  selector:
+    {{- include "s3-explorer.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,40 @@
+{{- if .Values.route.enabled }}
+{{- range .Values.route.routes }}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: {{ include "s3-explorer.fullname" $ }}{{ if .name }}-{{ .name }}{{ end }}
+  labels:
+    {{- include "s3-explorer.labels" $ | nindent 4 }}
+    {{- with .labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  annotations:
+    {{- with .annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .host }}
+  host: {{ . }}
+  {{- end }}
+
+  {{- with .path }}
+  path: {{ . }}
+  {{- end }}
+
+  to:
+    kind: Service
+    name: {{ include "s3-explorer.fullname" $ }}
+    weight: 100
+
+  port:
+    targetPort: {{ .targetPort }}
+
+  tls:
+    termination: {{ .tls.termination }}
+    insecureEdgeTerminationPolicy: {{ .tls.insecureEdgeTerminationPolicy }}
+
+  wildcardPolicy: None
+{{- end }}
+{{- end }}

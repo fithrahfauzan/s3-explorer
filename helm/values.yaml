@@ -1,0 +1,202 @@
+# -- Override the chart name.
+nameOverride: ""
+
+# -- Override the full resource name.
+fullnameOverride: ""
+
+# Container image configuration.
+image:
+  # -- Container image repository.
+  repository: "docker.io/ffauzan/s3-explorer"
+
+  # -- Kubernetes image pull policy.
+  # Valid values: Always, IfNotPresent, Never.
+  pullPolicy: IfNotPresent
+
+  # -- Image tag. Defaults to Chart.appVersion if omitted.
+  tag: "latest"
+
+# -- Number of replicas to run when autoscaling is disabled.
+replicaCount: 1
+
+# -- List of image pull secrets for private registries.
+imagePullSecrets: []
+
+# ServiceAccount configuration.
+serviceAccount:
+  # -- Create a ServiceAccount for this release.
+  create: false
+
+  # -- Additional annotations for the ServiceAccount.
+  annotations: {}
+
+  # -- Existing ServiceAccount name.
+  # If empty and create=true, one will be created automatically.
+  name: ""
+
+# -- Additional annotations added to the Pod.
+podAnnotations: {}
+
+# Pod-level security context.
+#
+# Example:
+# fsGroup: 2000
+podSecurityContext: {}
+
+# Container-level security context.
+#
+# Example:
+# capabilities:
+#   drop:
+#     - ALL
+# readOnlyRootFilesystem: true
+# runAsNonRoot: true
+# runAsUser: 1000
+securityContext: {}
+
+# Readiness probe configuration.
+#
+# Example:
+# httpGet:
+#   path: /
+#   port: http
+readinessProbe: {}
+
+# Liveness probe configuration.
+#
+# Example:
+# httpGet:
+#   path: /
+#   port: http
+livenessProbe: {}
+
+# -- List of init containers executed before the application starts.
+initContainers: []
+
+# -- Additional sidecar containers.
+extraContainers: []
+
+# Container ports exposed by the application.
+ports:
+  # -- Port name.
+  - name: http
+
+    # -- Container port.
+    containerPort: 8000
+
+    # -- Kubernetes Service port.
+    servicePort: 80
+
+    # -- Network protocol.
+    protocol: TCP
+
+# ConfigMap configuration.
+configMap:
+  # -- Create a ConfigMap.
+  enabled: true
+
+  # -- Key/value pairs stored in the ConfigMap.
+  data: 
+    RESTRICTED_MODE: true
+    BUCKET_1_ID: internal-bucket
+    BUCKET_1_NAME: cimbocto-private-asset
+    BUCKET_1_REGION: ap-southeast-3
+    BUCKET_1_AUTH_TYPE: irsa
+    BUCKET_2_ID: public-bucket
+    BUCKET_2_NAME: cimbocto-asset
+    BUCKET_2_REGION: ap-southeast-3
+    BUCKET_2_AUTH_TYPE: irsa
+
+# Secret configuration.
+secret:
+  # -- Create a Secret.
+  enabled: false
+
+  # -- Key/value pairs stored in the Secret.
+  #
+  # Values are automatically Base64-encoded by Kubernetes.
+  data:  {}
+
+# Kubernetes Service configuration.
+service:
+  # -- Create a Service.
+  enabled: true
+
+  # -- Service type.
+  # Valid values: ClusterIP, NodePort, LoadBalancer, ExternalName.
+  type: ClusterIP
+
+  # -- Additional service ports.
+  # Uses the same structure as "ports".
+  additionalPorts: []
+
+# OpenShift Route configuration.
+route:
+  # -- Create OpenShift Route resources.
+  enabled: true
+
+  # -- Route definitions.
+  routes:
+    - # -- Route name suffix. Empty uses the release name.
+      name: ""
+
+      # -- Route host. Leave empty to let OpenShift generate one.
+      host: ""
+
+      # -- Route path.
+      path: ""
+
+      # -- Target service port.
+      targetPort: http
+
+      # -- TLS termination type.
+      # Valid values: edge, passthrough, reencrypt
+      tls:
+        termination: edge
+        insecureEdgeTerminationPolicy: Redirect
+
+      # -- Additional annotations.
+      annotations: {}
+
+      # -- Additional labels.
+      labels: {}
+
+# Resource requests and limits.
+#
+# Example:
+# requests:
+#   cpu: 100m
+#   memory: 128Mi
+# limits:
+#   cpu: 500m
+#   memory: 512Mi
+resources: {}
+
+# Horizontal Pod Autoscaler configuration.
+autoscaling:
+  # -- Enable Horizontal Pod Autoscaler.
+  enabled: false
+
+  # -- Minimum number of replicas.
+  minReplicas: 1
+
+  # -- Maximum number of replicas.
+  maxReplicas: 1
+
+  # -- Target average CPU utilization percentage.
+  # targetCPUUtilizationPercentage: 80
+
+  # -- Target average memory utilization percentage.
+  # targetMemoryUtilizationPercentage: 80
+
+# -- Node selector labels for scheduling.
+nodeSelector: {}
+
+# -- List of tolerations.
+tolerations: []
+
+# -- Affinity rules.
+affinity: {}
+
+# -- Topology spread constraints.
+topologySpreadConstraints: []

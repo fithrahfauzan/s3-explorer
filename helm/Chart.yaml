@@ -1,0 +1,10 @@
+apiVersion: v2
+name: s3-explorer
+description: A modern, fast, and secure web application for browsing and managing AWS S3 buckets. Built with a premium glassmorphism UI and a robust Python API, S3 Explorer allows you to safely configure and access multiple S3 buckets without requiring global `s3:ListAllMyBuckets` IAM permissions.
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - service
+maintainers:
+  - name: Fithrah Fauzan
