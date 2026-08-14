@@ -1,4 +1,5 @@
 import logging
+import mimetypes
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +27,23 @@ logger = logging.getLogger("s3_explorer")
 # Cap how many keys a single listing request can return so one call
 # against a huge prefix can't stall the request or blow up memory.
 MAX_LIST_ITEMS = 1000
+
+# What S3 itself stores when a PUT/POST arrives without a Content-Type.
+DEFAULT_CONTENT_TYPE = "binary/octet-stream"
+
+
+def resolve_content_type(key: str, client_content_type: Optional[str] = None) -> str:
+    """Best-effort Content-Type for an upload.
+
+    S3 never infers a type from the key — an upload with no Content-Type is
+    stored as binary/octet-stream regardless of extension — so the value has
+    to be decided here and handed to the caller. The browser's own sniffed
+    File.type wins when present; otherwise fall back to the key's extension.
+    """
+    if client_content_type and client_content_type != DEFAULT_CONTENT_TYPE:
+        return client_content_type
+    guessed, _ = mimetypes.guess_type(key)
+    return guessed or DEFAULT_CONTENT_TYPE
 
 app = FastAPI(title="S3 Explorer API")
 
@@ -92,6 +110,9 @@ class UploadRequest(BaseModel):
     # the session's restricted_mode, so the "Get upload link" action works
     # the same way in both restricted and unrestricted sessions.
     manual: bool = False
+    # The browser's own File.type, when the caller has it. Takes precedence
+    # over guessing from the key, which is all a manual/curl caller can offer.
+    content_type: Optional[str] = None
 
 class DownloadRequest(BaseModel):
     key: str
@@ -204,33 +225,47 @@ def list_objects(bucket_id: str, prefix: str = "", delimiter: str = "/"):
 class PresignedUrl(BaseModel):
     url: str
     fields: Optional[Dict[str, str]] = None
+    # The Content-Type the object will be stored with. For the PUT path the
+    # caller has to send it as a header for it to take effect (see below).
+    content_type: Optional[str] = None
 
 @protected.post("/api/buckets/{bucket_id}/upload-url", response_model=PresignedUrl)
 def get_upload_url(bucket_id: str, request: UploadRequest, restricted_mode: bool = Depends(get_restricted_mode)):
     """Generate a presigned URL for uploading a file"""
     bucket = get_bucket_config(bucket_id)
     s3 = get_s3_client(bucket)
+    content_type = resolve_content_type(request.key, request.content_type)
     try:
         if restricted_mode or request.manual:
             # A single presigned PUT URL is what a plain `curl -X PUT` can hit
             # directly; a presigned POST would require the caller to also
             # replicate every form field, which doesn't fit a manual-upload
             # workflow. Leave Content-Type unsigned so any curl invocation
-            # works regardless of what Content-Type it sends.
+            # works regardless of what Content-Type it sends (or whether it
+            # sends one at all) — signing it would make the URL unusable for
+            # any caller that doesn't reproduce the header exactly. The type
+            # is returned separately so the caller can send it as a header;
+            # without that header S3 stores binary/octet-stream.
             url = s3.generate_presigned_url(
                 'put_object',
                 Params={'Bucket': bucket.bucket_name, 'Key': request.key},
                 ExpiresIn=3600
             )
-            return PresignedUrl(url=url)
+            return PresignedUrl(url=url, content_type=content_type)
 
-        # Generate presigned POST URL
+        # Generate presigned POST URL. S3 takes the stored Content-Type from
+        # the form field of that name, not from the multipart part header the
+        # browser sets, so it has to be signed into Fields here (and allowed
+        # by Conditions) — otherwise every browser upload lands as
+        # binary/octet-stream.
         response = s3.generate_presigned_post(
             Bucket=bucket.bucket_name,
             Key=request.key,
+            Fields={'Content-Type': content_type},
+            Conditions=[{'Content-Type': content_type}],
             ExpiresIn=3600
         )
-        return PresignedUrl(url=response['url'], fields=response['fields'])
+        return PresignedUrl(url=response['url'], fields=response['fields'], content_type=content_type)
     except ClientError as e:
         logger.error("Failed to create upload URL for bucket=%s key=%r: %s", bucket_id, request.key, e)
         raise HTTPException(status_code=400, detail=str(e))

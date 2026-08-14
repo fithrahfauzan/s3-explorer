@@ -80,6 +80,14 @@ This is useful for environments where you want people to be able to browse/fetch
 
 The "Get upload link" button generates a presigned `PUT` URL and shows it in a popup with a ready-to-run `curl` command (with a copy-to-clipboard button) — the user runs the command themselves to push the file to S3. Unlike the rest of restricted mode, **this is always available**, in both restricted and unrestricted sessions: it sits next to the normal drag-and-drop/"Upload" button when unrestricted, and is the only upload path when restricted.
 
+The generated command includes a `Content-Type` header, guessed from the key's extension:
+
+```bash
+curl -H "Content-Type: image/png" --upload-file "/path/to/photo.png" "<presigned-url>"
+```
+
+That header matters: `curl --upload-file` sends no `Content-Type` of its own, and S3 never infers one from the key, so dropping it stores the object as `binary/octet-stream`. `Content-Type` is deliberately left out of the URL signature (only `host` is signed), so the header can be changed — or omitted — without invalidating the link.
+
 ### Login (`AUTH_PASSWORD` / multi-profile)
 
 Set `AUTH_PASSWORD` (single shared password) or one or more `AUTH_PROFILE_{N}_PASSWORD` variables to require a password before the app (and every `/api` route except `/api/health` and `/api/auth/*`) becomes usable. Leaving both unset disables login entirely — the app behaves exactly as before.

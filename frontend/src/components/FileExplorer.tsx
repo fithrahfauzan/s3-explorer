@@ -80,7 +80,7 @@ export function FileExplorer() {
   const [pendingDeleteKey, setPendingDeleteKey] = useState<string | null>(null);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
   const [uploadFileName, setUploadFileName] = useState('');
-  const [uploadResult, setUploadResult] = useState<{ key: string; url: string } | null>(null);
+  const [uploadResult, setUploadResult] = useState<{ key: string; url: string; contentType: string } | null>(null);
   const [isGeneratingLink, setIsGeneratingLink] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
@@ -179,8 +179,8 @@ export function FileExplorer() {
     try {
       setIsGeneratingLink(true);
       const key = currentPrefix + uploadFileName.trim();
-      const { url } = await s3Api.getUploadUrl(activeBucketId, key, true);
-      setUploadResult({ key, url });
+      const { url, content_type } = await s3Api.getUploadUrl(activeBucketId, key, true);
+      setUploadResult({ key, url, contentType: content_type || 'binary/octet-stream' });
     } catch (error) {
       console.error('Failed to generate upload link:', error);
       toast.add({ title: 'Could not generate upload link', description: uploadFileName, type: 'error' });
@@ -204,20 +204,30 @@ export function FileExplorer() {
     try {
       setIsUploading(true);
       const key = currentPrefix + file.name;
-      const { url, fields } = await s3Api.getUploadUrl(activeBucketId, key);
+      const { url, fields, content_type } = await s3Api.getUploadUrl(
+        activeBucketId,
+        key,
+        false,
+        file.type,
+      );
 
       if (fields) {
-        // Presigned POST
+        // Presigned POST. The signed fields include Content-Type, which is
+        // what S3 stores the object as; `file` has to be appended last
+        // because S3 ignores any field that follows it.
         const formData = new FormData();
         Object.entries(fields).forEach(([k, v]) => formData.append(k, v));
         formData.append('file', file);
-        await axios.post(url, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
+        // Let the browser set the multipart Content-Type itself so it can
+        // include the boundary — passing it explicitly drops the boundary
+        // and S3 rejects the body as malformed.
+        await axios.post(url, formData);
       } else {
-        // Presigned PUT
+        // Presigned PUT. Content-Type isn't signed into the URL, so this
+        // header is the only thing that keeps S3 from storing the object as
+        // binary/octet-stream.
         await axios.put(url, file, {
-          headers: { 'Content-Type': file.type }
+          headers: { 'Content-Type': content_type || file.type || 'binary/octet-stream' }
         });
       }
 
@@ -289,8 +299,12 @@ export function FileExplorer() {
 
   const breadcrumbs = currentPrefix.split('/').filter(Boolean);
 
+  // `curl -T` sends no Content-Type of its own, and S3 never infers one from
+  // the key — without this header the object is stored as
+  // binary/octet-stream. Content-Type isn't signed into the URL, so adding
+  // the header here doesn't break the signature.
   const curlCommand = uploadResult
-    ? `curl -X PUT --upload-file "/path/to/${uploadResult.key.split('/').pop()}" "${uploadResult.url}"`
+    ? `curl -H "Content-Type: ${uploadResult.contentType}" --upload-file "/path/to/${uploadResult.key.split('/').pop()}" "${uploadResult.url}"`
     : '';
 
   const SortHeader = ({ label, sortKeyName }: { label: string; sortKeyName: SortKey }) => (
