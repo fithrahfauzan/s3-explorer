@@ -48,6 +48,7 @@ export interface ListObjectsResponse {
 export interface PresignedUrl {
   url: string;
   fields?: Record<string, string>;
+  content_type?: string;
 }
 
 export interface AppConfig {
@@ -92,8 +93,17 @@ export const s3Api = {
     return data;
   },
 
-  getUploadUrl: async (bucketId: string, key: string, manual: boolean = false): Promise<PresignedUrl> => {
-    const { data } = await api.post(`/buckets/${bucketId}/upload-url`, { key, manual });
+  getUploadUrl: async (
+    bucketId: string,
+    key: string,
+    manual: boolean = false,
+    contentType?: string,
+  ): Promise<PresignedUrl> => {
+    const { data } = await api.post(`/buckets/${bucketId}/upload-url`, {
+      key,
+      manual,
+      content_type: contentType || undefined,
+    });
     return data;
   },
 
