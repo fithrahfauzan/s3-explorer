@@ -1,7 +1,7 @@
 import logging
 import mimetypes
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Cookie, Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Cookie, Depends, FastAPI, Header, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -14,10 +14,12 @@ from src.config import settings, BucketConfig
 from src.auth import (
     SESSION_COOKIE_NAME,
     SESSION_TTL_SECONDS,
+    check_api_token,
     check_password,
     create_session_token,
     decode_session_token,
     is_rate_limited,
+    parse_bearer_token,
     record_login_attempt,
 )
 
@@ -58,25 +60,47 @@ app.add_middleware(
 def get_session_payload(session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME)) -> Optional[Dict[str, Any]]:
     return decode_session_token(session)
 
-def require_auth(payload: Optional[Dict[str, Any]] = Depends(get_session_payload)) -> None:
-    # No auth profiles configured means auth is opt-in and currently off.
-    if not settings.load_auth_profiles():
+def get_principal(
+    session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> Optional[Dict[str, Any]]:
+    """The verified caller, from either credential type, or None if neither
+    resolves. A browser presents a signed session cookie; an external client
+    presents `Authorization: Bearer <token>`. Both are tried and the first
+    that resolves wins, so a stale cookie alongside a valid bearer token
+    still authenticates. The returned dict carries only `restricted_mode` —
+    every downstream access decision reads it from here, never from the
+    global default, so one credential's access level can't leak into
+    another's."""
+    payload = decode_session_token(session)
+    if payload is not None:
+        return {"restricted_mode": bool(payload.get("restricted_mode", settings.RESTRICTED_MODE))}
+
+    token_restricted_mode = check_api_token(parse_bearer_token(authorization))
+    if token_restricted_mode is not None:
+        return {"restricted_mode": token_restricted_mode}
+
+    return None
+
+def require_auth(principal: Optional[Dict[str, Any]] = Depends(get_principal)) -> None:
+    # No credentials configured at all means auth is opt-in and currently off.
+    if not settings.auth_configured():
         return
-    if payload is None:
+    if principal is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-def get_restricted_mode(payload: Optional[Dict[str, Any]] = Depends(get_session_payload)) -> bool:
+def get_restricted_mode(principal: Optional[Dict[str, Any]] = Depends(get_principal)) -> bool:
     # Only fall back to the global flag when auth is off entirely (no
-    # profiles configured) — an authenticated request always defers to the
-    # restricted_mode baked into its own signed session, never the global
-    # default, so one profile's access level can't leak into another's.
-    if not settings.load_auth_profiles():
+    # credentials configured) — an authenticated request always defers to
+    # the restricted_mode carried by its own credential.
+    if not settings.auth_configured():
         return settings.RESTRICTED_MODE
-    return bool(payload.get("restricted_mode", settings.RESTRICTED_MODE)) if payload else settings.RESTRICTED_MODE
+    return bool(principal["restricted_mode"]) if principal else settings.RESTRICTED_MODE
 
-# Every route below requires a valid session (unless no auth profiles are
-# configured). /api/health and /api/auth/* are registered directly on `app`
-# and stay public.
+# Every route below requires a valid credential — session cookie or
+# `Authorization: Bearer` API token — unless no credentials are configured
+# at all. /api/health and /api/auth/* are registered directly on `app` and
+# stay public.
 protected = APIRouter(dependencies=[Depends(require_auth)])
 
 def get_bucket_config(bucket_id: str) -> BucketConfig:

@@ -20,6 +20,14 @@ class AuthProfile(BaseModel):
     password: str
     restricted_mode: bool
 
+class ApiToken(BaseModel):
+    """A static bearer token for non-browser API clients. Same access model
+    as an AuthProfile (each token carries its own restricted_mode), but
+    presented as an `Authorization: Bearer <token>` header instead of a
+    login + session cookie."""
+    token: str
+    restricted_mode: bool
+
 class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = ["*"]
     # Global app mode. When True: delete is disabled everywhere, and uploads
@@ -93,6 +101,46 @@ class Settings(BaseSettings):
             profiles.append(AuthProfile(password=self.AUTH_PASSWORD, restricted_mode=self.RESTRICTED_MODE))
 
         return profiles
+
+    def load_api_tokens(self) -> List[ApiToken]:
+        """Static bearer tokens for external/programmatic API access, so a
+        script can call the API with an `Authorization: Bearer` header
+        instead of logging in for a session cookie. Each token has its own
+        restricted_mode, mirroring load_auth_profiles().
+
+        Env format: API_TOKEN_{INDEX}_VALUE plus optional
+        API_TOKEN_{INDEX}_RESTRICTED_MODE (default false). API_TOKEN (no
+        index) is accepted as a single-token fallback using the global
+        RESTRICTED_MODE, mirroring the AUTH_PASSWORD fallback above."""
+        tokens = []
+        indices = set()
+        for key in os.environ:
+            if key.startswith("API_TOKEN_") and key.endswith("_VALUE"):
+                parts = key.split("_")
+                # Expected format exactly: API_TOKEN_{INDEX}_VALUE, INDEX numeric.
+                # The strict check keeps a typo'd var name (API_TOKEN_1_FOO_VALUE)
+                # from silently re-reading an existing token instead of erroring.
+                if len(parts) == 4 and parts[2].isdigit():
+                    indices.add(parts[2])
+
+        for idx in sorted(indices):
+            prefix = f"API_TOKEN_{idx}_"
+            value = os.environ.get(f"{prefix}VALUE")
+            if value:
+                restricted_mode = os.environ.get(f"{prefix}RESTRICTED_MODE", "false").strip().lower() == "true"
+                tokens.append(ApiToken(token=value, restricted_mode=restricted_mode))
+
+        single = os.environ.get("API_TOKEN")
+        if not tokens and single:
+            tokens.append(ApiToken(token=single, restricted_mode=self.RESTRICTED_MODE))
+
+        return tokens
+
+    def auth_configured(self) -> bool:
+        """True when any credential type is configured (login password or
+        static API token). When True, every protected route requires a valid
+        credential; when False, the API is fully open."""
+        return bool(self.load_auth_profiles() or self.load_api_tokens())
 
     class Config:
         env_file = ".env"

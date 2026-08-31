@@ -63,6 +63,7 @@ This makes it extremely flexible for both local development and secure cloud dep
 | `RESTRICTED_MODE` | `false` | Global, app-wide safety mode (applies to every configured bucket). Used as a fallback when no login profiles are configured, or when auth is off entirely. See below. |
 | `AUTH_PASSWORD` | unset | Enables the login page with a single shared password using `RESTRICTED_MODE`. Ignored if any `AUTH_PROFILE_N_PASSWORD` is set. See below. |
 | `AUTH_PROFILE_{N}_PASSWORD` / `AUTH_PROFILE_{N}_RESTRICTED_MODE` | unset | Multiple login profiles, each with its own password and restricted-mode flag. See below. |
+| `API_TOKEN_{N}_VALUE` / `API_TOKEN_{N}_RESTRICTED_MODE` | unset | Static bearer tokens for external/programmatic API access (`Authorization: Bearer <token>`), no session cookie needed. Each token carries its own restricted-mode. `API_TOKEN` (no index) works as a single-token fallback. See below. |
 | `SESSION_SECRET` | random per process start | Signs the session cookie. See below. |
 | `SESSION_SECURE_COOKIE` | `true` | Marks the session cookie `Secure` (HTTPS-only). Set to `false` for local HTTP-only development. |
 
@@ -87,6 +88,55 @@ curl -H "Content-Type: image/png" --upload-file "/path/to/photo.png" "<presigned
 ```
 
 That header matters: `curl --upload-file` sends no `Content-Type` of its own, and S3 never infers one from the key, so dropping it stores the object as `binary/octet-stream`. `Content-Type` is deliberately left out of the URL signature (only `host` is signed), so the header can be changed — or omitted — without invalidating the link.
+
+### API Tokens (external / programmatic access)
+
+The login flow above is built for a browser: POST a password to `/api/auth/login`, get an `HttpOnly` session cookie, send it back on every call. A script or another service can't use that comfortably.
+
+Set one or more `API_TOKEN_{N}_VALUE` (each with an optional `API_TOKEN_{N}_RESTRICTED_MODE`, default `false`) to allow callers to authenticate with a header instead:
+
+```env
+API_TOKEN_1_VALUE=<long-random-string>
+API_TOKEN_1_RESTRICTED_MODE=false
+
+API_TOKEN_2_VALUE=<another-long-random-string>
+API_TOKEN_2_RESTRICTED_MODE=true
+```
+
+Generate values with `openssl rand -hex 32`. `API_TOKEN` (no index) is accepted as a single-token fallback using the global `RESTRICTED_MODE`.
+
+Every protected `/api` route then also accepts:
+
+```
+Authorization: Bearer <token>
+```
+
+The token's own `restricted_mode` governs that request exactly like a login profile's does — a restricted token gets a presigned `PUT` URL from the upload endpoint and is rejected (`403`) by delete, regardless of the global `RESTRICTED_MODE`.
+
+Example — get a presigned upload URL and push a file, no cookie anywhere:
+
+```bash
+BASE=https://your-deployment.example.com
+TOKEN=<your-api-token>
+
+RESP=$(curl -sS -X POST "$BASE/api/buckets/dev-bucket/upload-url" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "reports/2026-q1.pdf", "manual": true}')
+
+URL=$(echo "$RESP" | jq -r .url)
+CT=$(echo "$RESP" | jq -r .content_type)
+
+curl -sS -H "Content-Type: $CT" --upload-file ./2026-q1.pdf "$URL"
+```
+
+Notes:
+
+- Always send `"manual": true` in the upload-url body. Without it, an unrestricted token gets a presigned **POST** (a `url` + `fields` form) instead of a plain PUT URL, and the `curl --upload-file` above won't work against it. A restricted token always gets the PUT URL regardless.
+- Comparison is constant-time and every configured token is checked (no early exit), same as passwords. Tokens are never logged.
+- Both credential types can be configured at once. Per request, a valid session cookie is tried first, then the `Authorization` header.
+- Configuring **only** API tokens (no password) still locks down every `/api` route — but a deployment that serves the web UI must also set a login password, since the UI can't send a `Bearer` header.
+- Browsers never attach an `Authorization` header on their own, so this adds no CSRF surface beyond what the wildcard-CORS note above already covers.
 
 ### Login (`AUTH_PASSWORD` / multi-profile)
 

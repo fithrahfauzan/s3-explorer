@@ -75,6 +75,34 @@ def check_password(candidate: str) -> Optional[bool]:
     return matched_restricted_mode
 
 
+def check_api_token(candidate: Optional[str]) -> Optional[bool]:
+    """Checks candidate against every configured static API token (no early
+    exit, constant-time compare — same treatment as check_password) and
+    returns the matched token's restricted_mode, or None if no token
+    matches. Callers must test `is None`, not truthiness: a valid
+    unrestricted token returns False."""
+    if not candidate:
+        return None
+    matched_restricted_mode: Optional[bool] = None
+    candidate_bytes = candidate.encode("utf-8")
+    for api_token in settings.load_api_tokens():
+        if hmac.compare_digest(candidate_bytes, api_token.token.encode("utf-8")):
+            matched_restricted_mode = api_token.restricted_mode
+    return matched_restricted_mode
+
+
+def parse_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    """Extracts the token from an `Authorization: Bearer <token>` header.
+    Returns None for a missing or non-Bearer header. Uses partition so a
+    malformed header can never raise."""
+    if not authorization:
+        return None
+    scheme, _, token = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return token.strip()
+
+
 def is_rate_limited(client_id: str) -> bool:
     now = time.time()
     attempts = [t for t in _LOGIN_ATTEMPTS.get(client_id, []) if now - t < LOGIN_WINDOW_SECONDS]

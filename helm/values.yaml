@@ -115,6 +115,11 @@ secret:
   # -- Key/value pairs stored in the Secret.
   #
   # Values are automatically Base64-encoded by Kubernetes.
+  # Put sensitive env vars here (not in the ConfigMap), e.g.:
+  #   AUTH_PROFILE_1_PASSWORD: "..."
+  #   API_TOKEN_1_VALUE: "..."          # external Bearer-token API access
+  #   API_TOKEN_1_RESTRICTED_MODE: "true"
+  #   SESSION_SECRET: "..."
   data:  {}
 
 # Kubernetes Service configuration.
