@@ -21,3 +21,7 @@ frontend/.env.production
 
 # Config
 config/buckets.json
+
+# Helm secret value overrides (never commit)
+*.secrets.yaml
+*.secrets.yml

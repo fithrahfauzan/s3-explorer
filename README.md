@@ -11,6 +11,7 @@ A modern, fast, and secure web application for browsing and managing AWS S3 buck
 - **Search, Sort & File-Type Icons:** Filter the current folder by name, click a column header to sort by name/date/size, and files show an icon based on their extension.
 - **Toasts & Confirm Dialogs:** Upload/download/delete feedback is shown via toast notifications, and deletes require confirmation in a proper dialog (no native browser popups).
 - **Multi-Profile Login:** Configure more than one login password, each with its own restricted-mode access level baked into its session — e.g. one full-access login and one restricted-only login on the same deployment.
+- **Static API Tokens:** External scripts and services can call the same protected `/api` routes with an `Authorization: Bearer <token>` header instead of a browser login — each token carrying its own restricted-mode.
 - **Modern Tech Stack:**
   - **Frontend:** React, Vite, TypeScript, TanStack Query, and **shadcn/ui** components.
   - **Backend:** Python, FastAPI, and `boto3` (managed via `uv`).
@@ -217,17 +218,52 @@ The fully contained application will be accessible at `http://localhost:8000`.
 
 ---
 
+## Kubernetes / OpenShift (Helm)
+
+A Helm chart is in [`helm/`](helm/). It deploys the same single-container image,
+with app config injected as env vars from a `ConfigMap` (non-secret: buckets,
+regions, `RESTRICTED_MODE`) and a `Secret` (passwords, API tokens,
+`SESSION_SECRET`, manual bucket keys).
+
+```bash
+helm upgrade --install s3-explorer ./helm \
+  -n s3-explorer --create-namespace \
+  -f ./s3-explorer.secrets.yaml
+```
+
+Secret values go in a git-ignored override file passed with `-f`, **never** in
+`values.yaml`. Full instructions, parameter table, IRSA and secret-rotation
+notes: [`helm/README.md`](helm/README.md).
+
+---
+
 ## Architecture Diagram
 
 ```mermaid
 graph TD
-    Client[Frontend: React + Vite + shadcn/ui] -->|REST API Calls| API[Backend: Python FastAPI]
-    API -->|boto3 Default Credential Chain| AWS_S3[(AWS S3)]
-    API -->|boto3 Manual Creds| AWS_S3
-    Client -->|Direct Presigned Upload/Download| AWS_S3
-    
-    subgraph S3 Authentication Methods
-        IRSA[Boto3 Native Auth Chain]
-        Manual[Manual Access/Secret Keys]
+    Browser["Frontend<br/>React + Vite + shadcn/ui"]
+    Ext["External client<br/>script / service / curl"]
+
+    Browser -->|"REST calls + session cookie"| Auth
+    Ext -->|"REST calls + Authorization: Bearer &lt;token&gt;"| Auth
+
+    subgraph Backend["Backend: Python FastAPI"]
+        Auth["Auth layer<br/>signed session cookie · static API token<br/>· restricted-mode per credential"]
+        Routes["/api routes<br/>list · presign upload · presign download · delete"]
+        Auth --> Routes
     end
+
+    Routes -->|"boto3 (IRSA / default chain or manual keys)"| S3[("AWS S3")]
+    Routes -.->|"returns presigned URL"| Browser
+    Routes -.->|"returns presigned URL"| Ext
+    Browser ==>|"direct upload / download"| S3
+    Ext ==>|"direct upload / download"| S3
+
+    subgraph AuthN["S3 credential methods (per bucket)"]
+        IRSA["IRSA / boto3 default chain"]
+        Manual["Manual access/secret keys"]
+    end
+    S3 -.- AuthN
 ```
+
+**Flow:** every request carries a credential — a browser sends its signed session cookie, an external caller sends `Authorization: Bearer <token>`. The auth layer resolves it to a principal (with that credential's own restricted-mode) before any route runs. Routes never move file bytes: they hand back a presigned S3 URL and the client uploads/downloads straight to S3. The backend talks to S3 with per-bucket credentials (IRSA/boto3 default chain, or manual keys).
