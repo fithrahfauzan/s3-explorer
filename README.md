@@ -18,10 +18,21 @@ A modern, fast, and secure web application for browsing and managing AWS S3 buck
 
 ## Project Structure
 
-- `/src` - The FastAPI Python backend code.
-- `/frontend` - The React SPA frontend.
-- `pyproject.toml` - Python dependency management for `uv`.
-- `Makefile` - Helper commands for running the app.
+```
+src/                    FastAPI backend
+  main.py                 app, routes, S3 presigning, static-frontend serving
+  config.py               env-driven settings: buckets, auth profiles, API tokens
+  auth.py                 session-cookie signing, password + API-token checks, rate limiting
+frontend/               React + Vite SPA (TypeScript, TanStack Query, shadcn/ui)
+  src/components/         AuthGate, LoginPage, FileExplorer, ui/ (shadcn primitives)
+  src/api.ts              typed API client
+  src/lib/auth.ts         auth-status hook + global 401 handler
+helm/                   Helm chart for Kubernetes / OpenShift (see helm/README.md)
+Dockerfile              multi-stage build: Vite frontend bundled into the FastAPI image
+Makefile                install / dev / build / docker helper targets
+pyproject.toml          backend dependencies (managed by uv; uv.lock is the lockfile)
+.env.example            annotated template for the .env described below
+```
 
 ---
 
@@ -61,7 +72,7 @@ This makes it extremely flexible for both local development and secure cloud dep
 | Variable | Default | Description |
 |---|---|---|
 | `CORS_ORIGINS` | `["*"]` | Origins allowed to call the API. Only matters when the frontend is served from a different origin than the backend (e.g. running `make dev-frontend` separately) — set this to your frontend's URL in that case. |
-| `RESTRICTED_MODE` | `false` | Global, app-wide safety mode (applies to every configured bucket). Used as a fallback when no login profiles are configured, or when auth is off entirely. See below. |
+| `RESTRICTED_MODE` | `false` | Global, app-wide safety mode (applies to every configured bucket). Used when auth is off entirely, and as the restricted-mode fallback for credentials that don't set their own (`AUTH_PASSWORD`, the no-index `API_TOKEN`). Login profiles and `API_TOKEN_{N}_*` each carry their own. See below. |
 | `AUTH_PASSWORD` | unset | Enables the login page with a single shared password using `RESTRICTED_MODE`. Ignored if any `AUTH_PROFILE_N_PASSWORD` is set. See below. |
 | `AUTH_PROFILE_{N}_PASSWORD` / `AUTH_PROFILE_{N}_RESTRICTED_MODE` | unset | Multiple login profiles, each with its own password and restricted-mode flag. See below. |
 | `API_TOKEN_{N}_VALUE` / `API_TOKEN_{N}_RESTRICTED_MODE` | unset | Static bearer tokens for external/programmatic API access (`Authorization: Bearer <token>`), no session cookie needed. Each token carries its own restricted-mode. `API_TOKEN` (no index) works as a single-token fallback. See below. |
